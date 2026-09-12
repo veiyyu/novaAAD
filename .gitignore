@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 output/
 _to_delete_pycache/
+
+data/
+*.log
