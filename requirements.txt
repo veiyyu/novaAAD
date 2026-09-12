@@ -8,3 +8,7 @@ mne
 mne-lsl
 # Live audio output (scripts.auditory.live device playback) also needs:
 sounddevice
+# Calibration session (tools/calibration_session.py, tools/xdf_to_trial.py):
+# capture via LabRecorder (https://github.com/labstreaminglayer/App-LabRecorder,
+# installed separately -- not a pip package) and convert its .xdf output.
+pyxdf
