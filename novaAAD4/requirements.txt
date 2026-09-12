@@ -1,0 +1,12 @@
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+# Optional: only needed if a subject file is MATLAB v7.3 (HDF5). The public
+# KU Leuven release is v5 and loads with scipy alone.
+mat73>=0.65
+h5py>=3.8
+
+# --- optional: only for the LIVE demo (not needed for analysis or replay) ---
+soxr>=0.3          # stateful live resampler (LSLEEG + tests)
+# sounddevice>=0.4     # live audio in/out (--audio mic / --output play)
+# mne-lsl>=1.5         # live EEG over LSL (--eeg lsl), e.g. ANT Neuro eego
