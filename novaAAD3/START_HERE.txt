@@ -1,0 +1,67 @@
+NEURO-STEERED HEARING — START HERE
+==================================
+
+WHAT THE FILES ARE
+------------------
+- The ".md" files (README.md, PROJECT.md, BUILD_DAY.md, GIT_INSTRUCTIONS.md) are
+  just text documents. ".md" = "Markdown", plain text with light formatting.
+  To read one: double-click it (opens in TextEdit), OR open it in any code editor,
+  OR — nicest — view it on GitHub once uploaded, where it shows formatted.
+  PROJECT.md is also provided as a PDF (NOVA_neuro_steered_hearing.pdf) if you'd
+  rather just read that.
+- The ".py" files are the program.
+- results/ holds the outputs: the accuracy chart, the demo video, and a demo audio clip.
+
+GET THE DATA (one time)
+-----------------------
+Download the subject files and stimuli.zip from https://zenodo.org/records/4004271
+Make a folder called "AAD" (on your Desktop is easiest) containing:
+    AAD/S1.mat  AAD/S2.mat  AAD/S3.mat
+    AAD/stimuli/   <- unzip stimuli.zip into this
+(You already have this folder, Selina.)
+
+RUN THE LIVE DEMO (recorded EEG, plays sound, live browser screen)
+------------------------------------------------------------------
+Easiest: double-click  run_live_demo.command
+  (If macOS blocks it: right-click -> Open -> Open.)
+It installs what it needs the first time, then opens the demo in your browser:
+two "Talker" cards where the one you're attending to lights up and is amplified.
+
+Or from a Terminal:
+    pip install -r requirements.txt sounddevice
+    python3 live_demo.py --data-dir ~/Desktop/AAD
+
+DEMO WITH YOUR OWN AUDIO or TWO MICS
+------------------------------------
+Two recorded files:
+    python3 live_demo.py --data-dir ~/Desktop/AAD --audio file --files A.wav B.wav
+Two clip-on mics (one per talker, on a 2-channel USB interface):
+    python3 live_demo.py --data-dir ~/Desktop/AAD --audio mic
+
+MAKE THE SHAREABLE VIDEO
+------------------------
+Double-click  render_video.command   ->   results/demo_video.mp4
+
+TWO WAYS TO RUN IT LIVE WITH THE HEADSET (pick per demo)
+--------------------------------------------------------
+1) INSTANT, no calibration (best for random judges walking up):
+   Build a "generic" decoder once from a few teammates' recordings, then anyone uses it:
+       python3 pretrain_generic.py --data-dir ~/Desktop/AAD --subjects P1 P2 P3
+       python3 live_demo.py --data-dir ~/Desktop/AAD --decoder results/generic_decoder.npy
+2) STRONGER, ~3-minute personalize (best for a hero demo):
+       python3 calibrate.py --data-dir ~/Desktop/AAD --eeg lsl --minutes 3 --files A.wav B.wav
+       python3 live_demo.py --data-dir ~/Desktop/AAD --decoder results/personal_decoder.npy
+(Do NOT do a 1-minute calibration — it's worse than the generic decoder. See BUILD_DAY.md.)
+
+WHICH DOCUMENT IS WHICH
+-----------------------
+- START_HERE.txt ....... this file (quickstart)
+- README.md ............ full file list + all the commands
+- PROJECT.md (+ PDF) ... the explanation, the science, the results (share this one)
+- BUILD_DAY.md ......... exactly what to do on hackathon day with the ANT Neuro headset
+- GIT_INSTRUCTIONS.md .. how to put this on GitHub, step by step
+
+NOTE
+----
+The recorded-EEG demo (and the video) work today on any laptop with no headset.
+Using the real ANT Neuro headset live needs a short setup on the day — BUILD_DAY.md.
