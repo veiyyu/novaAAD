@@ -1,0 +1,10 @@
+# novaAAD v5 (self-contained: bundles the NOVA2026 auditory engine).
+# Offline path (convert / train / replay / evaluate / build the demo):
+numpy
+scipy
+soxr
+mne
+# Live path (scripts.auditory.live on a real cap via StreamSession/LSL) also needs:
+mne-lsl
+# Live audio output (scripts.auditory.live device playback) also needs:
+sounddevice
