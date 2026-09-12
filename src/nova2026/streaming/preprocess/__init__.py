@@ -2,19 +2,23 @@
 
 Transform stages share the contract ``stage(data, timestamps) ->
 (data, timestamps)`` and keep their state across variable-size chunks.
-``QualityMonitor`` is an observer, not a transform: feed it raw samples and ask
-about a window later. Nothing here touches LSL, threads or the buffer; only
+``QualityMonitor`` and ``BadChannelJudge`` are judges, not transforms: feed the
+monitor raw samples and ask about a window later; the judge only packages that
+answer for a window. Nothing here touches LSL, threads or the buffer; only
 ``Resampler`` requires the optional ``soxr`` dependency.
 """
 
 # Re-export every public preprocessing piece from one import location.
 from .filters import SosFilter, design_bandpass, design_notch
-from .quality import QualityMonitor
+from .quality import BadChannelJudge, QualityMonitor
 from .repair import Repair, UnrepairableError
 from .resample import Resampler, ResamplerQualityWarning, select_quality
+from .scope import ChannelScope
 from .units import unit_scaler
 
 __all__ = [
+    "BadChannelJudge",
+    "ChannelScope",
     "QualityMonitor",
     "Repair",
     "Resampler",

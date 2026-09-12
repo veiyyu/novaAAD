@@ -45,11 +45,17 @@ PYTHONPATH=src:. python -m scripts.auditory.replay --trial data/converted/S1_tes
 Verify the bundled engine:
 ```bash
 PYTHONPATH=src:. python -m pytest scripts/auditory/tests/test_auditory.py \
-                                  scripts/auditory/tests/test_report_fixes.py -q   # 37 passed
+                                  scripts/auditory/tests/test_report_fixes.py -q   # 44 passed
 ```
 
 See `INTEGRATION.md` for how the demo maps onto the engine, and `VENDORED.md` for the
 engine's provenance and how to refresh it from `audio_v2`.
+
+**Bringing up a real cap:** `scripts/getlive` (newly vendored) is the hardware bring-up
+tool — cap-agnostic (resolves the channel contract at run time, `--cap auto|ca-208|declared`),
+and tolerates known-dead electrodes on a dry cap instead of failing the whole run. Read
+`scripts/getlive/README.md` and start with `python -m scripts.getlive.probe` before touching
+the live acceptance test.
 
 ## Scope / honesty
 

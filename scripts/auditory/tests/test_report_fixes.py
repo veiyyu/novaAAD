@@ -13,13 +13,19 @@ import numpy as np
 from scipy.io import wavfile
 
 from nova2026.auditory.audio import read_audio
+from nova2026.auditory.config import MIN_MARGIN
 from nova2026.auditory.controller import AttentionController
 from nova2026.auditory.data import AttentionEstimate, load_trial, save_trial
 from nova2026.auditory.decoder import RidgeDecoder
-from nova2026.auditory.evaluation import check_split, inject_fault, selection_metrics
+from nova2026.auditory.envelopes import EnvelopeExtractor
+from nova2026.auditory.evaluation import (
+    assert_held_out, check_split, inject_fault, selection_metrics,
+)
 from nova2026.auditory.streaming import AuditoryProcessor, stream_config
+from nova2026.streaming.preprocess import Resampler, ResamplerQualityWarning
 from nova2026.auditory.timing import TimestampedAudio, validate_audio_profile
 from scripts.auditory.evaluate import score_controls
+from scripts.auditory.outputs import guard_outputs
 from scripts.auditory.replay import replay
 from scripts.auditory.runner import ReplayFailure, replay_windows
 from scripts.auditory.streamer import AuditoryReplayStreamer
@@ -61,6 +67,26 @@ class ReportFixes(unittest.TestCase):
         ctl.update(AttentionEstimate([0, .8], 4, 4), 4)
         self.assertEqual(ctl.choice(4), 1)
 
+    def test_resampler_choice_is_pinned_and_its_precondition_holds(self):
+        """QQ is the only preset that fits, and the band-pass runs first.
+
+        QQ performs essentially no anti-aliasing, so the streaming package
+        requires allow_qq=True to be an explicit decision. It is one here: the
+        third-order 1-9 Hz band-pass precedes the resampler, and no clean SoXR
+        preset fits the 3.0 - 1.0 s startup budget, so disabling QQ makes the
+        chain unconstructible rather than safer.
+        """
+        trial = synthetic_trial("test")
+        with self.assertWarns(ResamplerQualityWarning):
+            processor = AuditoryProcessor(stream_config(trial, self.model.config))
+        self.assertEqual(processor.resampler.quality, "QQ")
+        self.assertEqual(processor.contract["resample_quality"], "QQ")
+        with self.assertRaises(ValueError):
+            Resampler(
+                trial.sample_rate, self.model.config.sample_rate, 2, quality="auto",
+                max_age_seconds=3.0, reserve_seconds=1.0, allow_qq=False, strict=True,
+            )
+
     def test_wrong_width_rejected_before_broadcast(self):
         window = next(w for w in replay_windows(synthetic_trial("test"), self.model.config) if w.valid)
         window.eeg = window.eeg[:, :1]
@@ -68,6 +94,67 @@ class ReportFixes(unittest.TestCase):
             self.model.validate(window)
         with self.assertRaises(ValueError):
             self.model.score(window)
+
+    def test_mismatched_fault_actually_decorrelates(self):
+        """The negative control must be able to fail on the shipped fixture."""
+        trial = synthetic_trial("test")
+        config = self.model.config
+        original = EnvelopeExtractor(trial.audio_rate, config).feed(trial.audio)
+        faulty = EnvelopeExtractor(trial.audio_rate, config).feed(
+            inject_fault(trial, "mismatched").audio
+        )
+        count = min(len(original), len(faulty))
+        for candidate in range(2):
+            correlation = np.corrcoef(
+                original[:count, candidate], faulty[:count, candidate]
+            )[0, 1]
+            self.assertLess(abs(correlation), MIN_MARGIN)
+
+    def test_held_out_guard_refuses_a_model_without_provenance(self):
+        assert_held_out(synthetic_trial("test"), self.model)  # trained: passes
+        undeclared = copy.deepcopy(self.model)
+        undeclared.training_info = {}
+        with self.assertRaises(ValueError):
+            assert_held_out(synthetic_trial("test"), undeclared)
+
+    def test_stale_invalid_evidence_cannot_clear_a_decision(self):
+        ctl = AttentionController(min_switch_windows=1)
+        ctl.update(AttentionEstimate([.8, 0], 10, 10), 10)
+        self.assertEqual(ctl.choice(10), 0)
+        stale = AttentionEstimate(None, 5, 10.1, False, ("processing_failed",))
+        ctl.update(stale, 10.1)
+        self.assertEqual(ctl.choice(10.1), 0)
+        fresh = AttentionEstimate(None, 11, 11, False, ("processing_failed",))
+        ctl.update(fresh, 11)
+        self.assertIsNone(ctl.choice(11))
+
+    def test_switch_delay_requires_a_sustained_choice(self):
+        times = [0, .5, 1, 1.5, 2, 2.5]
+        labels = [0, 0, 1, 1, 1, 1]
+        flicker = selection_metrics(times, [0, 0, 1, 0, 0, 0], labels, end_time=3)
+        self.assertEqual(flicker["reported_switch_delays_seconds"], [])
+        self.assertEqual(flicker["missed_switches"], 1)
+        settled = selection_metrics(times, [0, 0, 1, 1, 1, 1], labels, end_time=3)
+        self.assertEqual(settled["reported_switch_delays_seconds"], [0.0])
+        self.assertEqual(settled["missed_switches"], 0)
+
+    def test_alignment_accepts_an_unknown_availability_time(self):
+        trial = synthetic_trial("test")
+        provider = TimestampedAudio(trial.audio, trial.audio_rate, self.model.config)
+        processor = AuditoryProcessor(stream_config(trial, self.model.config))
+        window = next(iter(processor.feed((trial.eeg, trial.timestamps))))
+        window.available_at = None
+        aligned = provider.align(window)
+        self.assertEqual(aligned.available_at, float(window.timestamps[-1]))
+
+    def test_output_guard_refuses_then_force_overwrites(self):
+        with tempfile.TemporaryDirectory() as directory:
+            existing = Path(directory) / "metrics.json"
+            existing.write_text("{}")
+            with self.assertRaises(FileExistsError):
+                guard_outputs([existing])
+            guard_outputs([existing], force=True)
+            guard_outputs([Path(directory) / "absent.json"])
 
     def test_name_selection_and_missing_channels(self):
         trial = synthetic_trial("test")

@@ -9,7 +9,16 @@ from .envelopes import EnvelopeExtractor
 
 
 def validate_audio_profile(profile, sample_rate, block_size):
-    """Validate operator-measured loopback residual and frozen output settings."""
+    """Validate operator-measured loopback residual and frozen output settings.
+
+    ``residual_offset_seconds`` is a tolerance gate, not a correction. The
+    alignment in :class:`TimestampedAudio` never adds it: a run is accepted when
+    the operator's measured residual is inside +-30 ms, and that residual is
+    then carried in the diagnostics rather than compensated. Applying it would
+    need a sign convention that only the loopback measurement itself can settle
+    (subtracting the wrong sign doubles the error), so it is deliberately left
+    to the operator and recorded, not silently applied.
+    """
     required = {"device", "sample_rate", "block_size", "residual_offset_seconds"}
     if not isinstance(profile, dict) or set(profile) != required:
         raise ValueError("Audio timing profile requires device, sample_rate, block_size, residual_offset_seconds.")
@@ -54,6 +63,8 @@ class TimestampedAudio:
             self.blocks.append((position, frames, float(audible_at), error))
 
     def align(self, window):
+        if not len(window.timestamps):
+            raise ValueError("Alignment requires a nonempty window.")
         with self.lock:
             blocks = list(self.blocks)
         reasons = list(window.reasons)
@@ -79,8 +90,12 @@ class TimestampedAudio:
             if any(b[3] > self.tolerance and window.timestamps[0] - 1 <= b[2] <= window.timestamps[-1]
                    for b in blocks):
                 reasons.append("audio_clock_discontinuity")
+        # EEGWindow permits an unknown availability time; fall back to the last
+        # signal timestamp exactly as EnvelopeBuffer.align does.
+        available_at = (window.available_at if window.available_at is not None
+                        else float(window.timestamps[-1]))
         return AuditoryWindow(window.data, envelopes, window.timestamps,
-                              window.available_at, window.valid and not reasons,
+                              available_at, window.valid and not reasons,
                               reasons, window.contract, window.segment)
 
     def diagnostics(self):

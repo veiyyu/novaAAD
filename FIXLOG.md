@@ -1,10 +1,10 @@
 # FIXLOG — where the audit fixes live now
 
 The `NOVA2026_Current_Issues.pdf` audit is resolved in **`nova2026.auditory`**, which
-novaAAD v5 now **bundles** under `src/` (vendored from NOVA2026 `audio_v2` @ `8cbc503`;
+novaAAD v5 now **bundles** under `src/` (vendored from NOVA2026 `audio_v2` @ `13b01f4`, re-vendored 2026-09-12, was `8cbc503`;
 see `VENDORED.md`). The fixes live in the engine, not in novaAAD's own code. In this
 repo, `PYTHONPATH=src:. python -m pytest scripts/auditory/tests/test_auditory.py
-scripts/auditory/tests/test_report_fixes.py` runs **37 passing** engine tests
+scripts/auditory/tests/test_report_fixes.py` runs **44 passing** engine tests
 (`test_live_lsl.py` needs a live LSL outlet). Mapping, for reference:
 
 | Audit finding | Where it's fixed in the engine |

@@ -21,6 +21,9 @@ selects regularization using a separate fixture and writes `mixed.wav`,
 performance. All synthetic targets currently attend A; candidate-swap and zero
 model checks separately exercise label symmetry and abstention.
 
+The CLIs refuse to replace files that already exist, so re-running either command
+against the same `--out` needs `--force`.
+
 The second command compares quality-aware, ordinary hysteresis, neutral and oracle
 selection. It includes missing EEG, artifacts, mismatched audio, delayed inference,
 and audio clock offsets. Margins form a coverage/error curve; do not pick a margin
@@ -73,8 +76,11 @@ trailing lag rows. Training normalization is frozen for inference.
 Training selects nonoverlapping valid windows from the same one-second-hop
 processing contract used at inference. Regularization is selected on validation
 data. The model is not refitted on validation data. Development trial identities
-and groups are recorded, and evaluation rejects overlap with either partition.
-Group related repetitions/excerpts manually when their filenames differ. For new
+and groups are recorded, and evaluation rejects overlap with either partition. A
+model that records no provenance at all is refused rather than assumed held out:
+fitting a decoder in-process and evaluating it on its own trial is not a
+measurable experiment. Group related repetitions/excerpts manually when their
+filenames differ. For new
 participant claims also make the partitions subject-disjoint; the built-in group
 check alone does not enforce that research design.
 
@@ -175,6 +181,15 @@ paced and tests software timing without sending audio to a device. A run with no
 EEG decisions fails. Source labels/types/units are checked before acquisition;
 extra channels are selected out by name, never truncated by column count.
 
+Add `--record RECORDS --subject S --session A` to keep the raw run: the live path
+otherwise acquires without recording, which leaves nothing to re-analyse after a
+failure. The recorded run is closed with `status="failed"` and the error text
+whenever the EEG fails, the audio worker fails, or the audio device misses its
+shutdown deadline. `timing.json` carries the same information plus the recovery
+segments, the recovery events and the acquisition lag/gap counters, so a session
+that discarded chunks is distinguishable from a clean one. `--force` allows
+replacing files already present under `--out`.
+
 `--output play --timing-profile measured.json` uses the sound device's DAC time,
 mapped to the local LSL clock on each callback. `timing.json` records audio sample
 positions, source-clock timestamps, block timing errors and estimated drift.
@@ -185,6 +200,10 @@ The profile must match the one stored at calibration and contain exactly
 `residual_offset_seconds` (measured remaining EEG/audio offset). The block size is
 `round(sample_rate * 0.032)`. Residuals over 0.030 seconds fail startup. This is an
 operator-supplied loopback measurement, not a measurement inferred from correlations.
+The residual is a tolerance gate, not a correction: it is validated, printed and
+written into `timing.json`, but the alignment never subtracts it, because only the
+loopback measurement can fix its sign. Treat a small non-zero residual as an
+accepted offset, not as a compensated one.
 Measure the full playback/EEG path with a loopback signal, record calibration
 through the same path, and keep the device, rate and buffering fixed. The decoder's
 lag window does not absorb arbitrary offsets. Hardware timing remains unverified
@@ -205,9 +224,12 @@ has no reproducible generator. Personalization needs a held-out comparison.
 
 Metrics currently describe commanded selection, not the exact acoustic attenuation
 during a ramp. Durations exclude unknown ground truth. Reported switching delays
-are relative to the first known label after an uncertainty interval, not the exact
-keypress or neural transition time. Failed EEG runs are reported explicitly;
-remaining offline audio can still be rendered with the controller's fallback. WAV
+are measured from the true label change to the first block from which the new
+talker is held for the rest of that label segment, so a one-block flicker counts as
+a missed switch instead of an immediate successful one; they remain relative to the
+first known label after an uncertainty interval, not the exact keypress or neural
+transition time. Failed EEG runs are reported explicitly; remaining offline audio
+can still be rendered with the controller's fallback. WAV
 rendering reports audio underruns as null because no device was tested. Replayed
 EEG cannot respond to changed audio, so this is not evidence of comprehension or
 listening-effort improvement.

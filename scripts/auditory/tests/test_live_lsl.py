@@ -9,9 +9,18 @@ from uuid import uuid4
 import numpy as np
 
 from nova2026.auditory.timing import TimestampedAudio
-from scripts.auditory.live import run
+from scripts.auditory.live import channel_list, run
 from scripts.auditory.synthetic import synthetic_trial
 from scripts.auditory.train import train
+
+
+class ChannelOptionTests(unittest.TestCase):
+    def test_exclude_channels_option_parsing(self):
+        self.assertEqual(channel_list("Fp1, Fp2 ,,F7"), ("Fp1", "Fp2", "F7"))
+        self.assertEqual(channel_list(""), ())
+        self.assertEqual(channel_list(" F3 "), ("F3",))
+        with self.assertRaises(TypeError):
+            channel_list(None)
 
 
 class LiveAudioTests(unittest.TestCase):
@@ -66,6 +75,14 @@ class LiveAudioTests(unittest.TestCase):
         self.assertTrue(all(np.argmax(e["scores"]) == 0 for e in valid))
         self.assertTrue(all(e["emitted_at"] - e["evidence_end"] < 3 for e in valid))
         self.assertEqual(report["clock_domain"], "local_lsl")
+        # Channel policy travels into the run record, outside the contract.
+        quality = report["quality"]
+        self.assertTrue(quality["check_channels"])
+        self.assertEqual(quality["max_bad_channels"], 0)
+        self.assertEqual(quality["exclude_channels"], [])
+        self.assertIn("windows_with_bad_channels", quality)
+        self.assertIn("bad_channel_windows", quality)
+        self.assertIn("repair_held_rows", quality)
 
 
 if __name__ == "__main__":

@@ -416,31 +416,66 @@ class RunRecorder:
 
         # The FIF export reads the database back once at the end. Close the
         # connection even if the export fails, so a failed write cannot leak
-        # the handle (or mask the original error behind a locked file).
+        # the handle. The sidecar is written first and the export error is
+        # re-raised last: the database is complete either way, so the run
+        # directory should be missing the FIF, not its metadata.
+        export_error = None
         try:
             if self._export_fif and self.chunks:
                 self._export_fif_file()
+        except Exception as error:  # noqa: BLE001 - re-raised after the sidecar
+            export_error = error
         finally:
             self._connection.close()
 
         # Human-readable sidecar next to the database.
-        metadata = read_metadata(self.path)
-        self.path.with_suffix(".json").write_text(
-            json.dumps(metadata, indent=2), encoding="utf-8"
-        )
+        try:
+            metadata = read_metadata(self.path)
+            self.path.with_suffix(".json").write_text(
+                json.dumps(metadata, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            if export_error is None:
+                raise
+            # A failing sidecar write must not hide the export failure.
+
+        if export_error is not None:
+            raise export_error
         return self.path
 
     def _export_fif_file(self) -> None:
-        """Write the whole run as an MNE Raw FIF in source units."""
+        """Write the whole run as an MNE Raw FIF in source units.
+
+        The signal is materialised once, into a single preallocated float64
+        array filled chunk by chunk. Collecting the chunks first instead
+        (float32 blocks, a concatenated copy, then the float64 cast) triples
+        the peak, which is what makes a long run fail at the very end of an
+        otherwise good session.
+        """
 
         import mne
 
-        blocks = [data for data, _ in iter_chunks(self.path)]
-        signal = np.concatenate([block.T for block in blocks], axis=1)
+        channels = len(self._channels)
+        signal = np.empty((channels, self.samples), dtype=np.float64)
+        filled = 0
+        for data, _ in iter_chunks(self.path):
+            rows = len(data)
+            if filled + rows > self.samples:
+                raise RuntimeError(
+                    "Recorded chunks hold more samples than the run counted; "
+                    "refusing to export a truncated FIF."
+                )
+            signal[:, filled : filled + rows] = data.T
+            filled += rows
+        if filled != self.samples:
+            raise RuntimeError(
+                f"Recorded chunks hold {filled} samples but the run counted "
+                f"{self.samples}; refusing to export a truncated FIF."
+            )
         info = mne.create_info(
             list(self._channels), self._sfreq, self._ch_types, verbose=False
         )
-        raw = mne.io.RawArray(np.asarray(signal, dtype=np.float64), info, verbose=False)
+        raw = mne.io.RawArray(signal, info, verbose=False)
         raw.save(self.fif_path, overwrite=True, verbose=False)
 
     @classmethod

@@ -45,6 +45,8 @@ class EnvelopeBuffer:
         ]
 
     def align(self, window):
+        if not len(window.timestamps):
+            raise ValueError("Alignment requires a nonempty window.")
         reasons = list(window.reasons)
         envelopes = np.zeros((len(window.timestamps), 2))
         available_at = (window.available_at if window.available_at is not None

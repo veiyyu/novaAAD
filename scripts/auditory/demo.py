@@ -5,6 +5,7 @@ from pathlib import Path
 
 from nova2026.auditory.data import save_trial
 
+from .outputs import guard_outputs
 from .replay import replay
 from .synthetic import synthetic_trial
 from .train import train
@@ -17,8 +18,14 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default="output/auditory_demo")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing files under --out")
     args = parser.parse_args()
     output = Path(args.out)
+    guard_outputs(
+        [output / f"{name}.npz" for name in ("train", "validation", "test")]
+        + [output / "decoder.npz", output / "mixed.wav", output / "report.json"],
+        force=args.force,
+    )
     output.mkdir(parents=True, exist_ok=True)
     trials = []
     for name in ("train", "validation", "test"):

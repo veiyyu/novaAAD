@@ -91,25 +91,3 @@ def labels_for_window(trial, window):
     indices = np.searchsorted(trial.timestamps, window.timestamps, side="right") - 1
     indices = np.clip(indices, 0, len(trial.labels) - 1)
     return trial.labels[indices]
-
-
-class LiveAuditoryAdapter:
-    """Connect current processed windows to audio history and a result handoff.
-
-    EnvelopeBuffer is owned by the processing thread. The caller must drain a
-    bounded timestamped audio-feature queue on that thread before this callback.
-    The audio controller owns the independent decision-expiry clock.
-    """
-
-    def __init__(self, pipeline, envelopes, handoff, *, contract):
-        if contract != pipeline.model.contract:
-            raise ValueError("Source preprocessing/montage differs from the decoder.")
-        self.pipeline = pipeline
-        self.envelopes = envelopes
-        self.handoff = handoff
-
-    def rundown(self, window):
-        aligned = self.envelopes.align(window)
-        result = self.pipeline.rundown(aligned)
-        self.handoff.put(result[0])
-        return result

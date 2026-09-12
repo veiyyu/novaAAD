@@ -38,6 +38,12 @@ class AttentionController:
         if not math.isfinite(now):
             raise ValueError("Controller requires finite source-clock time.")
         scores = estimate.scores
+        # Stale evidence is ignored whether or not it is usable: an old failure
+        # report must not clear a decision that newer evidence justified.
+        # (A non-finite evidence_end compares false here and falls through to
+        # the invalid branch below, which is where it belongs.)
+        if estimate.evidence_end <= self.evidence_end:
+            return
         if (
             not estimate.valid
             or scores is None
@@ -48,8 +54,6 @@ class AttentionController:
         ):
             self.selected = None
             self.pending, self.pending_count = None, 0
-            return
-        if estimate.evidence_end <= self.evidence_end:
             return
         age = now - estimate.evidence_end
         if age < 0 or age > self.max_age or estimate.emitted_at > now:

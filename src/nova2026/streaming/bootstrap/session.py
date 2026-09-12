@@ -15,6 +15,7 @@ import numpy as np
 
 from ..acquire import Acquire
 from ..circular_buffer import CircularBuffer
+from ..judges import collect_verdict
 from ..preflight import ChannelContract
 from ..recording import RunRecorder, RunSpec
 from ..window import EEGWindow
@@ -35,7 +36,10 @@ class StreamSession:
         judges: Verdict providers queried by ``wrap()``; each must expose
             ``reasons(start, end) -> tuple[str, ...]`` (for example a
             :class:`~..preprocess.QualityMonitor`). Their reasons are unioned,
-            so one rejected reason marks the whole window invalid.
+            so one rejected reason marks the whole window invalid. A judge may
+            additionally expose ``bad_channels(start, end) -> tuple[str, ...]``;
+            those are unioned into the window's evidence and never into its
+            verdict.
         out_sfreq: Output rate in Hz that drives the window geometry; falls
             back to ``args.out_sfreq`` when omitted.
         source_unit_exponent: Power of ten of the source unit (0 = volts),
@@ -204,15 +208,17 @@ class StreamSession:
 
         Returns:
             An EEGWindow whose ``valid`` is False for warm-up windows or
-            windows rejected by any registered judge.
+            windows rejected by any registered judge, and whose
+            ``bad_channels`` lists every channel the judges found faulty
+            whether or not that rejected the window.
         """
 
         start = float(window_times[0])
         end = float(window_times[-1])
-        # Union every judge's verdict over this window's time span.
-        reasons = sorted(
-            {reason for judge in self.judges for reason in judge.reasons(start, end)}
-        )
+        # Union every judge's verdict over this window's time span. Bad
+        # channels come back separately: a run that tolerates a dead electrode
+        # must still record that the electrode was dead.
+        reasons, bad_channels = collect_verdict(self.judges, start, end)
         valid = start_sample >= self.warmup_samples and not reasons
 
         return EEGWindow(
@@ -226,6 +232,7 @@ class StreamSession:
             channel_names=self.channels[: self.eeg_count],
             contract=None,
             available_at=float(window_times[-1]),
+            bad_channels=bad_channels,
         )
 
     def close(

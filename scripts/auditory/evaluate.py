@@ -13,6 +13,7 @@ from nova2026.auditory.decoder import RidgeDecoder
 from nova2026.auditory.config import MIN_MARGIN
 from nova2026.auditory.evaluation import assert_held_out, inject_fault
 
+from .outputs import guard_outputs
 from .replay import replay
 from .runner import replay_windows, labels_for_window
 
@@ -70,6 +71,7 @@ def main():
     parser.add_argument("--model", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--force", action="store_true", help="Overwrite an existing --out file")
     args = parser.parse_args()
     trial = load_trial(args.trial)
     model = RidgeDecoder.load(args.model)
@@ -94,6 +96,7 @@ def main():
         _, _, metrics = replay(trial, model, audio_offset=offset)
         results.append({"fault": "audio_clock_offset", "offset": offset, **metrics})
     path = Path(args.out)
+    guard_outputs([path], force=args.force)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({**score_controls(trial, model, args.seed), "comparisons": results}, indent=2))
     print(f"Wrote {len(results)} comparisons to {path}")

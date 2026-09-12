@@ -22,8 +22,20 @@ from nova2026.auditory.pipeline import AuditoryPipeline
 from nova2026.auditory.streaming import AuditoryProcessor, stream_config
 from nova2026.auditory.timing import TimestampedAudio, validate_audio_profile
 
+from .outputs import guard_outputs
 
-def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=None, timing_profile=None):
+
+def channel_list(text):
+    """Split a comma-separated channel option into labels, dropping blanks."""
+
+    if not isinstance(text, str):
+        raise TypeError("A channel list option must be a string.")
+    return tuple(name.strip() for name in text.split(",") if name.strip())
+
+
+def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=None,
+        timing_profile=None, record=None, subject="demo", session_name="synthetic",
+        check_channels=True, max_bad_channels=0, exclude_channels=()):
     from mne_lsl.lsl import local_clock
     from nova2026.streaming import prepare
     from nova2026.streaming.bootstrap import StreamSession
@@ -36,7 +48,8 @@ def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=No
         timing_profile = validate_audio_profile(timing_profile, trial.audio_rate, frames)
         if timing_profile != model.training_info.get("audio_timing_profile"):
             raise ValueError("Audio configuration differs from model calibration; recalibrate.")
-        print(f"Verified profile residual: {timing_profile['residual_offset_seconds'] * 1000:.1f} ms; "
+        print(f"Audio profile residual: {timing_profile['residual_offset_seconds'] * 1000:.1f} ms "
+              f"(tolerance gate, not compensated); "
               f"device={timing_profile['device']}, rate={trial.audio_rate:g}, block={frames}")
     else:
         print("Paced WAV: software clock test; no acoustic offset measurement.")
@@ -45,7 +58,10 @@ def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=No
     metadata = SimpleNamespace(sample_rate=float(stream.info["sfreq"]),
                                channel_names=tuple(model.contract["eeg_channels"]),
                                reference=trial.reference, upstream_processing=trial.upstream_processing)
-    settings = stream_config(metadata, model.config, history)
+    settings = stream_config(metadata, model.config, history,
+                             check_channels=check_channels,
+                             max_bad_channels=max_bad_channels,
+                             exclude_channels=exclude_channels)
     processor = AuditoryProcessor(settings)
     if processor.contract != model.contract:
         raise ValueError("Connected source/processing/window differs from model; retrain through this chain.")
@@ -53,7 +69,8 @@ def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=No
                        n_eeg=len(settings.eeg_channels), source_unit_exponent=source_unit_exponent)
     args = SimpleNamespace(sfreq=settings.input_sfreq, out_sfreq=model.config.sample_rate,
                            window=history, hop=1., capacity=history + 4, warmup=2.,
-                           block=max(1, round(settings.input_sfreq * .032)))
+                           block=max(1, round(settings.input_sfreq * .032)),
+                           record=record, subject=subject, session=session_name)
     session = StreamSession(stream, args, settings.eeg_channels, contract=contract)
     scaler = unit_scaler(source_unit_exponent, desired_exponent=-6)
     provider = TimestampedAudio(trial.audio, trial.audio_rate, model.config)
@@ -62,6 +79,8 @@ def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=No
     pipeline = AuditoryPipeline(model, local_clock)
     stop = Event()
     errors, rendered, estimates = [], [], []
+    bad_channel_windows = {}
+    windows_with_bad_channels = 0
     position = 0
 
     def block(count, audible):
@@ -125,6 +144,13 @@ def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=No
             data, times = session.ingest(data, times)
             data, times = scaler(data, times)
             for raw in processor.feed((data, times)):
+                # A tolerated dead electrode still belongs in the run record:
+                # "which channels were bad, and how often" is what decides the
+                # next session's exclusion list.
+                if raw.bad_channels:
+                    windows_with_bad_channels += 1
+                    for name in raw.bad_channels:
+                        bad_channel_windows[name] = bad_channel_windows.get(name, 0) + 1
                 raw.available_at = local_clock()
                 aligned = provider.align(raw)
                 estimate, _ = pipeline.rundown(aligned)
@@ -138,9 +164,20 @@ def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=No
     finally:
         # EEG failure releases acquisition but allows the independent audio to finish neutral.
         session.acquire.close()
-        session.close(status="failed" if eeg_error else "completed")
         worker.join(timeout=max(0, (len(trial.audio) - position) / trial.audio_rate) + 3)
         stop.set()
+        # Close the recorder only once the worker has settled, so the recorded
+        # status and error describe what actually happened to the whole run.
+        if worker.is_alive():
+            failure = RuntimeError("Audio worker exceeded its shutdown deadline.")
+        elif errors:
+            failure = errors[0]
+        else:
+            failure = eeg_error
+        session.close(
+            status="completed" if failure is None else "failed",
+            error=None if failure is None else repr(failure),
+        )
     if worker.is_alive():
         raise RuntimeError("Audio worker exceeded its shutdown deadline.")
     if errors:
@@ -149,7 +186,29 @@ def run(trial, model, stream, *, source_unit_exponent=0, output="wav", window=No
         raise eeg_error
     if not estimates:
         raise RuntimeError("No EEG decisions produced; run is not a successful live evaluation.")
-    return np.concatenate(rendered), {"estimates": estimates, **provider.diagnostics()}
+    # Recovery resets and transport health belong in the run record: without
+    # them a session that discarded chunks looks identical to a clean one.
+    report = {
+        "estimates": estimates,
+        "recording": None if session.recorder is None else str(session.recorder.path),
+        "audio_timing_profile": timing_profile,
+        "recovery_segments": int(processor.recovery.segment),
+        "recovery_events": list(processor.recovery.events),
+        "acquire_max_lag_seconds": float(session.acquire.max_lag),
+        "acquire_gaps": int(session.acquire.gaps),
+        # Channel policy is run configuration, never part of the model
+        # contract: the decoder is the same one whatever the cap tolerates.
+        "quality": {
+            "check_channels": bool(settings.check_channels),
+            "max_bad_channels": int(settings.max_bad_channels),
+            "exclude_channels": list(settings.exclude_channels),
+            "windows_with_bad_channels": windows_with_bad_channels,
+            "bad_channel_windows": dict(sorted(bad_channel_windows.items())),
+            "repair_held_rows": int(processor.repair.held_rows),
+        },
+        **provider.diagnostics(),
+    }
+    return np.concatenate(rendered), report
 
 
 def main():
@@ -163,17 +222,39 @@ def main():
     parser.add_argument("--window", type=float, help="Must match the trained model history")
     parser.add_argument("--out", required=True)
     parser.add_argument("--timing-profile", help="Measured loopback/profile JSON required for --output play")
+    parser.add_argument("--record", help="Recording root for the raw run (provenance + offline replay)")
+    parser.add_argument("--subject", default="demo", help="Subject identity stored with --record")
+    parser.add_argument("--session", default="synthetic", help="Session identity stored with --record")
+    parser.add_argument("--max-bad-channels", type=int, default=0,
+                        help="Bad EEG channels tolerated in one window before quality rejects it "
+                             "(default 0: any faulty channel rejects)")
+    parser.add_argument("--no-channel-check", action="store_true",
+                        help="Record bad channels but never let them reject a window "
+                             "(dry caps with dead electrodes)")
+    parser.add_argument("--exclude-channels", default="",
+                        help="Comma-separated labels of known-dead channels; they are still "
+                             "recorded but cannot reject a window")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing files under --out")
     args = parser.parse_args()
+    exclude_channels = channel_list(args.exclude_channels)
     trial, model = load_trial(args.trial), RidgeDecoder.load(args.model)
+    destination = Path(args.out)
+    guard_outputs(
+        [destination / "mixed.wav", destination / "timing.json"], force=args.force
+    )
     stream = StreamLSL(bufsize=4., name=args.stream)
     stream.connect(acquisition_delay=None, processing_flags=["clocksync"], timeout=10)
     try:
         audio, report = run(trial, model, stream, source_unit_exponent=args.source_unit_exponent,
                             output=args.output, window=args.window,
+                            record=args.record, subject=args.subject,
+                            session_name=args.session,
+                            check_channels=not args.no_channel_check,
+                            max_bad_channels=args.max_bad_channels,
+                            exclude_channels=exclude_channels,
                             timing_profile=json.loads(Path(args.timing_profile).read_text()) if args.timing_profile else None)
     finally:
         stream.disconnect()
-    destination = Path(args.out)
     destination.mkdir(parents=True, exist_ok=True)
     wavfile.write(destination / "mixed.wav", round(trial.audio_rate), audio)
     (destination / "timing.json").write_text(json.dumps(report, indent=2))

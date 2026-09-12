@@ -24,6 +24,10 @@ class EEGWindow:
         contract: Optional serializable window/processing contract, useful
             for model compatibility checks.
         available_at: Latest source time consumed for this window, when known.
+        bad_channels: Labels of the EEG channels a judge found faulty in this
+            window. Evidence, not a verdict: a window can carry bad channels
+            and still be valid when the run tolerates them (see
+            :class:`~.preprocess.QualityMonitor`).
 
     Notes:
         Arrays are copied, so mutating the inputs afterwards never changes the
@@ -43,6 +47,7 @@ class EEGWindow:
         channel_names: tuple[str, ...] = (),
         contract: dict | None = None,
         available_at: float | None = None,
+        bad_channels: tuple[str, ...] = (),
     ) -> None:
         """Validate shapes and copy every array."""
 
@@ -68,6 +73,7 @@ class EEGWindow:
         self.segment = int(segment)
         self.artifact_id = artifact_id
         self.channel_names = tuple(str(name) for name in channel_names)
+        self.bad_channels = tuple(str(name) for name in bad_channels)
         self.contract = dict(contract) if contract else None
         self.available_at = (
             float(available_at) if available_at is not None else None
@@ -83,5 +89,6 @@ class EEGWindow:
             f"EEGWindow(samples={len(self.data)}, "
             f"eeg={self.data.shape[1]}, eog={self.eog.shape[1]}, "
             f"valid={self.valid}, reasons={self.reasons}, "
+            f"bad_channels={self.bad_channels}, "
             f"start={self.start_sample})"
         )

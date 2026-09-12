@@ -2,20 +2,26 @@
 
 The supported path now uses `nova2026.streaming` for auditory training, replay
 and live EEG. Old saved models must be retrained. The current streaming suite
-passes 181 tests on Windows, including LSL transport and recording. The 38 auditory
-tests and 32 legacy streaming tests also pass (251 total). Added auditory
+passes 181 tests on Windows, including LSL transport and recording. The 45 auditory
+tests and 32 legacy streaming tests also pass (258 total). Added auditory
 regressions cover the report's latency, faults, confidence, timing, model contracts,
-metrics, held-out grouping, worker error and shutdown findings. A real LSL test
+metrics, held-out grouping, worker error and shutdown findings, plus the audit
+follow-ups listed in `documents/AUDIO_V2_AUDIT.md`. A real LSL test
 publishes EEG with timestamps anchored to paced audio and verifies correct
 synthetic candidate scores and fresh evidence.
 
 ```powershell
-python -B -m unittest discover -s tests/streaming -q
-python -B -m unittest discover -s scripts/auditory/tests -q
-python -B -m unittest discover -s scripts/dataproc/streaming/tests -q
-python -B -m scripts.auditory.demo --out tmp/auditory_validation
-python -B -m scripts.auditory.evaluate --trial tmp/auditory_validation/test.npz --model tmp/auditory_validation/decoder.npz --seed 7 --out tmp/auditory_validation/evaluation.json
+.venv/Scripts/python.exe -B -m unittest discover -s tests/streaming -q
+.venv/Scripts/python.exe -B -m unittest discover -s scripts/auditory/tests -q
+.venv/Scripts/python.exe -B -m unittest discover -s scripts/dataproc/streaming/tests -q
+.venv/Scripts/python.exe -B -m scripts.auditory.demo --out tmp/auditory_validation
+.venv/Scripts/python.exe -B -m scripts.auditory.evaluate --trial tmp/auditory_validation/test.npz --model tmp/auditory_validation/decoder.npz --seed 7 --out tmp/auditory_validation/evaluation.json
 ```
+
+Bare `python` is not enough: the dependencies live in `.venv`, and the earlier
+form of these commands failed with `ModuleNotFoundError: No module named 'mne'`.
+The CLIs now refuse to replace existing outputs, so re-running any of the last
+two commands needs `--force`.
 
 Evaluation now reports counts, abstentions and binomial intervals alongside
 controller comparisons. Zero output abstains. Intervals over windows do not

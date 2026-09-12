@@ -15,6 +15,7 @@ from nova2026.auditory.decoder import RidgeDecoder
 from nova2026.auditory.evaluation import assert_held_out, inject_fault, selection_metrics
 from nova2026.auditory.pipeline import AuditoryPipeline
 
+from .outputs import guard_outputs
 from .runner import ReplayFailure, replay_windows
 
 
@@ -120,6 +121,7 @@ def main():
     parser.add_argument("--audio-offset", type=float, default=0.0)
     parser.add_argument("--margin", type=float, default=MIN_MARGIN)
     parser.add_argument("--zero-model", action="store_true")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing files under --out")
     args = parser.parse_args()
     trial = inject_fault(load_trial(args.trial), args.fault)
     model = RidgeDecoder.load(args.model)
@@ -138,6 +140,10 @@ def main():
         trial, model, args.margin, args.delay, args.audio_offset, args.mode
     )
     output = Path(args.out)
+    guard_outputs(
+        [output / "mixed.wav", output / "estimates.json", output / "metrics.json"],
+        force=args.force,
+    )
     output.mkdir(parents=True, exist_ok=True)
     wavfile.write(output / "mixed.wav", round(trial.audio_rate), audio)
     (output / "estimates.json").write_text(json.dumps(estimates, indent=2))

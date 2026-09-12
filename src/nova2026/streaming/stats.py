@@ -21,6 +21,8 @@ class StreamStats:
         dropped: Damaged source rows dropped before the first finite sample.
         gaps: Source timestamp gaps counted by the acquire handle.
         max_lag: Oldest consumed block age observed (seconds).
+        offload_dropped: Windows discarded by the offloader's overflow policy.
+        offload_failed: Analysis calls that raised on a worker thread.
     """
 
     def __init__(self) -> None:
@@ -36,6 +38,8 @@ class StreamStats:
         self.dropped = 0
         self.gaps = 0
         self.max_lag = 0.0
+        self.offload_dropped = 0
+        self.offload_failed = 0
 
     def to_dict(self) -> dict:
         """Return a serializable snapshot of these counters."""
